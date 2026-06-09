@@ -1,11 +1,15 @@
 import { config } from '../../config/index.js';
+import { checkDatabaseConnection } from '../../db/index.js';
 
-export function getHealth(_req, res) {
+export async function getHealth(_req, res) {
+  const database = await checkDatabaseConnection();
+
   res.status(200).json({
     status: 'ok',
     service: config.app.name,
     version: config.app.version,
     environment: config.nodeEnv,
-    uptimeSeconds: Math.round(process.uptime())
+    uptimeSeconds: Math.round(process.uptime()),
+    database
   });
 }

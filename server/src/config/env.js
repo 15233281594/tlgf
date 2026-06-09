@@ -13,3 +13,17 @@ export function readNumberEnv(name, fallback) {
 
   return parsed;
 }
+
+export function readBooleanEnv(name, fallback) {
+  const value = readEnv(name, String(fallback)).toLowerCase();
+
+  if (['1', 'true', 'yes', 'on'].includes(value)) {
+    return true;
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(value)) {
+    return false;
+  }
+
+  throw new Error(`Invalid boolean for ${name}: ${value}`);
+}
