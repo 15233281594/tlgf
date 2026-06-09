@@ -63,8 +63,9 @@ const RIFT_X_SIGN = -1
 const RIFT_YAW_SIGN = RIFT_X_SIGN < 0 ? -1 : 1
 const MAP_VIEW_PADDING = 0.36
 const MAP_GROUND_Y = 0.02
-const RIFT_BASE_ASSET = '/assets/rift-base-preview.glb'
-const RIFT_ENTITY_PATH = '/assets/rift-entities-optimized'
+const publicAsset = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
+const RIFT_BASE_ASSET = publicAsset('assets/rift-base-preview.glb')
+const RIFT_ENTITY_PATH = publicAsset('assets/rift-entities-optimized')
 
 function riftPoint(x: number, z: number, y = MAP_GROUND_Y) {
   return new THREE.Vector3((x - MAP_CENTER_X) * MAP_UNIT_SCALE * RIFT_X_SIGN, y, (z - MAP_CENTER_Z) * MAP_UNIT_SCALE)
