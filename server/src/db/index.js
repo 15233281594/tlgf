@@ -1,47 +1,14 @@
-import { readFileSync } from 'node:fs';
+// 暴露数据库统一入口，兼容初始化脚本的 mysql2 和业务层 Sequelize。
 import mysql from 'mysql2/promise';
-import { config } from '../config/index.js';
+import {
+  getDatabaseConnectionOptions,
+  getDatabaseSslOptions,
+  isDatabaseConfigured
+} from './options.js';
+import { closeSequelize } from './sequelize.js';
+import { authenticateModels } from '../models/index.js';
 
 let pool;
-
-export function isDatabaseConfigured() {
-  return Boolean(config.database.host && config.database.user && config.database.name);
-}
-
-export function getDatabaseSslOptions() {
-  if (!config.database.ssl) {
-    return undefined;
-  }
-
-  const sslOptions = {
-    minVersion: 'TLSv1.2'
-  };
-
-  if (config.database.sslCaPath) {
-    sslOptions.ca = readFileSync(config.database.sslCaPath, 'utf8');
-  }
-
-  return sslOptions;
-}
-
-export function getDatabaseConnectionOptions({ includeDatabase = true, multipleStatements = false } = {}) {
-  if (!isDatabaseConfigured()) {
-    throw new Error('Database is not configured. Set DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME.');
-  }
-
-  return {
-    host: config.database.host,
-    port: config.database.port,
-    user: config.database.user,
-    password: config.database.password,
-    database: includeDatabase ? config.database.name : undefined,
-    waitForConnections: true,
-    connectionLimit: config.database.connectionLimit,
-    connectTimeout: config.database.connectTimeoutMs,
-    multipleStatements,
-    ssl: getDatabaseSslOptions()
-  };
-}
 
 export function getDatabasePool() {
   if (!pool) {
@@ -49,6 +16,10 @@ export function getDatabasePool() {
   }
 
   return pool;
+}
+
+function getDatabaseErrorCode(error) {
+  return error.parent?.code ?? error.original?.code ?? error.code ?? 'DB_ERROR';
 }
 
 export async function checkDatabaseConnection() {
@@ -59,15 +30,31 @@ export async function checkDatabaseConnection() {
   }
 
   try {
-    const [rows] = await getDatabasePool().query('SELECT 1 AS ok');
+    await authenticateModels();
 
     return {
-      status: rows?.[0]?.ok === 1 ? 'ok' : 'unknown'
+      status: 'ok'
     };
   } catch (error) {
     return {
       status: 'error',
-      code: error.code ?? 'DB_ERROR'
+      code: getDatabaseErrorCode(error)
     };
   }
 }
+
+export async function closeDatabaseConnections() {
+  const tasks = [closeSequelize()];
+
+  if (pool) {
+    tasks.push(
+      pool.end().finally(() => {
+        pool = undefined;
+      })
+    );
+  }
+
+  await Promise.all(tasks);
+}
+
+export { getDatabaseConnectionOptions, getDatabaseSslOptions, isDatabaseConfigured };

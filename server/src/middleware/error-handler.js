@@ -1,3 +1,4 @@
+// 统一处理接口异常，转换成标准 JSON 错误响应。
 import { HttpError } from '../core/errors.js';
 import { logger } from '../core/logger.js';
 

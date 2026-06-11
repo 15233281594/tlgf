@@ -1,3 +1,4 @@
+// 读取本地 .env 文件，并提供环境变量类型转换工具。
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 

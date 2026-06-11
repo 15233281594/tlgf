@@ -1,3 +1,4 @@
+// 执行 SQL 初始化脚本，创建后端所需数据库表。
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

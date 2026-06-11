@@ -1,3 +1,4 @@
+// Express 应用组装入口，负责注册安全头、中间件、路由和统一错误处理。
 import express from 'express';
 import { config } from './config/index.js';
 import { errorHandler } from './middleware/error-handler.js';

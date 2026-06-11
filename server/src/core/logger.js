@@ -1,3 +1,4 @@
+// 提供统一的结构化日志输出方法。
 function write(level, message, meta = {}) {
   const event = {
     level,

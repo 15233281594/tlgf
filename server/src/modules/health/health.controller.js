@@ -1,3 +1,4 @@
+// 提供服务健康检查接口。
 import { config } from '../../config/index.js';
 import { checkDatabaseConnection } from '../../db/index.js';
 

@@ -1,7 +1,8 @@
+// HTTP 服务启动入口，负责监听端口、记录数据库状态和优雅退出。
 import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { logger } from './core/logger.js';
-import { checkDatabaseConnection } from './db/index.js';
+import { checkDatabaseConnection, closeDatabaseConnections } from './db/index.js';
 
 const app = createApp();
 
@@ -33,13 +34,19 @@ const server = app.listen(config.port, config.host, () => {
 
 const shutdown = (signal) => {
   logger.info(`received ${signal}, shutting down`);
-  server.close((error) => {
+  server.close(async (error) => {
     if (error) {
       logger.error('shutdown failed', { error: error.message });
       process.exit(1);
     }
 
-    process.exit(0);
+    try {
+      await closeDatabaseConnections();
+      process.exit(0);
+    } catch (closeError) {
+      logger.error('database shutdown failed', { error: closeError.message });
+      process.exit(1);
+    }
   });
 };
 
