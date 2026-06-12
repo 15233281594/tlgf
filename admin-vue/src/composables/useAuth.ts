@@ -1,6 +1,12 @@
 import { computed, ref } from "vue";
-import { getCurrentAdmin, loginAdmin, logoutAdmin } from "../api/auth";
-import type { AdminUser, LoginPayload } from "../types/auth";
+import {
+  changeCurrentAdminPassword,
+  getCurrentAdmin,
+  loginAdmin,
+  logoutAdmin,
+  updateCurrentAdminProfile,
+} from "../api/auth";
+import type { AdminUser, ChangePasswordPayload, LoginPayload, UpdateProfilePayload } from "../types/auth";
 
 const loading = ref(false);
 const submitting = ref(false);
@@ -65,8 +71,23 @@ async function logout() {
   sessionChecked = true;
 }
 
+async function updateProfile(payload: UpdateProfilePayload) {
+  const result = await updateCurrentAdminProfile(payload);
+  user.value = result.user;
+  sessionChecked = true;
+  return result.user;
+}
+
+async function changePassword(payload: ChangePasswordPayload) {
+  const result = await changeCurrentAdminPassword(payload);
+  user.value = result.user;
+  sessionChecked = true;
+  return result.user;
+}
+
 export function useAuth() {
   return {
+    changePassword,
     ensureSession,
     errorMessage,
     isLoggedIn,
@@ -75,6 +96,7 @@ export function useAuth() {
     logout,
     refreshSession,
     submitting,
+    updateProfile,
     user,
   };
 }

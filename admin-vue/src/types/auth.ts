@@ -3,6 +3,7 @@ export type AdminUser = {
   email: string
   name: string
   role: string
+  permissions: string[]
 }
 
 export type AuthResponse = {
@@ -13,4 +14,13 @@ export type AuthResponse = {
 export type LoginPayload = {
   email: string
   password: string
+}
+
+export type UpdateProfilePayload = {
+  name: string
+}
+
+export type ChangePasswordPayload = {
+  currentPassword: string
+  newPassword: string
 }

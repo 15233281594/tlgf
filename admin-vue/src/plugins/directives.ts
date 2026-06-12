@@ -1,19 +1,16 @@
 import type { App, DirectiveBinding } from 'vue'
 import { useAuth } from '../composables/useAuth'
+import { hasPermission } from '../utils/permissions'
 
-function canAccess(requiredRoles: string | string[]) {
+function canAccess(requiredPermissions: string | string[]) {
   const { user } = useAuth()
 
-  if (!requiredRoles || !user.value) {
+  if (!requiredPermissions || !user.value) {
     return false
   }
 
-  if (user.value.role === 'super_admin') {
-    return true
-  }
-
-  const roles = Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles]
-  return roles.includes(user.value.role)
+  const permissions = Array.isArray(requiredPermissions) ? requiredPermissions : [requiredPermissions]
+  return permissions.some((permission) => hasPermission(user.value?.permissions, permission))
 }
 
 function applyPermission(el: HTMLElement, binding: DirectiveBinding<string | string[]>) {

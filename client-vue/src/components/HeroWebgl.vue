@@ -64,7 +64,20 @@ const RIFT_YAW_SIGN = RIFT_X_SIGN < 0 ? -1 : 1
 const MAP_VIEW_PADDING = 0.36
 const MAP_GROUND_Y = 0.02
 const publicAsset = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
-const RIFT_BASE_ASSET = publicAsset('assets/rift-base-preview.glb')
+const RIFT_BASE_ASSETS = [
+  {
+    url: publicAsset('assets/rift-base-webp.glb'),
+    label: '高清峡谷地形',
+  },
+  {
+    url: publicAsset('assets/rift-base-fast.glb'),
+    label: '快速峡谷地形',
+  },
+  {
+    url: publicAsset('assets/rift-base-preview.glb'),
+    label: '轻量峡谷地形',
+  },
+]
 const RIFT_ENTITY_PATH = publicAsset('assets/rift-entities-optimized')
 
 function riftPoint(x: number, z: number, y = MAP_GROUND_Y) {
@@ -673,6 +686,176 @@ function createScanField() {
   return mesh
 }
 
+function createFallbackMapTexture() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1024
+  canvas.height = 1024
+  const ctx = canvas.getContext('2d')
+
+  if (!ctx) {
+    return new THREE.CanvasTexture(canvas)
+  }
+
+  const gradient = ctx.createRadialGradient(512, 512, 80, 512, 512, 560)
+  gradient.addColorStop(0, '#173528')
+  gradient.addColorStop(0.52, '#0d241c')
+  gradient.addColorStop(1, '#071119')
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, 1024, 1024)
+
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  const drawLane = (points: Array<[number, number]>, color: string, width: number) => {
+    ctx.beginPath()
+    points.forEach(([x, y], index) => {
+      if (index === 0) {
+        ctx.moveTo(x, y)
+        return
+      }
+
+      ctx.lineTo(x, y)
+    })
+    ctx.strokeStyle = color
+    ctx.lineWidth = width
+    ctx.shadowColor = color
+    ctx.shadowBlur = 16
+    ctx.stroke()
+    ctx.shadowBlur = 0
+  }
+
+  drawLane([[118, 905], [292, 714], [512, 512], [713, 308], [906, 118]], 'rgba(255, 215, 122, 0.56)', 18)
+  drawLane([[122, 900], [108, 704], [138, 456], [180, 254], [320, 120], [906, 118]], 'rgba(71, 231, 255, 0.32)', 15)
+  drawLane([[118, 905], [300, 900], [542, 878], [755, 820], [906, 680], [906, 118]], 'rgba(86, 226, 160, 0.28)', 15)
+
+  ctx.fillStyle = 'rgba(71, 231, 255, 0.14)'
+  ctx.beginPath()
+  ctx.ellipse(345, 655, 116, 68, -0.7, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = 'rgba(185, 139, 255, 0.14)'
+  ctx.beginPath()
+  ctx.ellipse(682, 358, 118, 68, -0.7, 0, Math.PI * 2)
+  ctx.fill()
+
+  const drawBase = (x: number, y: number, color: string) => {
+    ctx.fillStyle = color
+    ctx.shadowColor = color
+    ctx.shadowBlur = 22
+    ctx.beginPath()
+    ctx.arc(x, y, 36, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.32)'
+    ctx.lineWidth = 5
+    ctx.stroke()
+  }
+
+  drawBase(118, 906, 'rgba(71, 231, 255, 0.74)')
+  drawBase(906, 118, 'rgba(255, 98, 98, 0.72)')
+
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)'
+  ctx.lineWidth = 2
+  for (let index = 96; index < 1024; index += 96) {
+    ctx.beginPath()
+    ctx.moveTo(index, 0)
+    ctx.lineTo(index, 1024)
+    ctx.moveTo(0, index)
+    ctx.lineTo(1024, index)
+    ctx.stroke()
+  }
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  return texture
+}
+
+function createFallbackRiftMap(root: THREE.Group) {
+  const mapGroup = new THREE.Group()
+  mapGroup.name = 'fallback-rift-map'
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(MAP_SCENE_SIZE, MAP_SCENE_SIZE, 64, 64),
+    new THREE.MeshStandardMaterial({
+      color: '#123024',
+      map: createFallbackMapTexture(),
+      roughness: 0.86,
+      metalness: 0.02,
+    }),
+  )
+  ground.rotation.x = -Math.PI / 2
+  ground.position.y = -0.035
+  ground.receiveShadow = true
+  mapGroup.add(ground)
+
+  const border = new THREE.Mesh(
+    new THREE.TorusGeometry(MAP_SCENE_SIZE / 2, 0.012, 10, 160),
+    new THREE.MeshBasicMaterial({
+      color: '#ffd77a',
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  )
+  border.rotation.x = -Math.PI / 2
+  border.position.y = 0.01
+  mapGroup.add(border)
+
+  const addBeacon = (position: THREE.Vector3, color: string) => {
+    const beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.12, 0.28, 6),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.32,
+        roughness: 0.62,
+      }),
+    )
+    beacon.position.copy(position)
+    beacon.position.y = 0.12
+    mapGroup.add(beacon)
+  }
+
+  addBeacon(riftPoint(1450, 1450), '#47e7ff')
+  addBeacon(riftPoint(13250, 13250), '#ff6464')
+  addBeacon(riftPoint(5007, 10471), '#b98bff')
+  addBeacon(riftPoint(9866, 4414), '#56e2a0')
+
+  root.add(mapGroup)
+  terrainPickMeshes.push(ground)
+  return [ground]
+}
+
+function attachRiftStage(root: THREE.Group, terrainMeshes: THREE.Mesh[], loader: GLTFLoader) {
+  root.updateMatrixWorld(true)
+  addTacticalOverlay(root)
+  scanField = createScanField()
+  root.add(scanField)
+  focusRipple = addFocusRipple(root)
+  markers.forEach((marker) => root.add(createMarker(marker)))
+  updateLayerVisibility()
+
+  enterRiftStage(100)
+
+  entityHydrateTimer = window.setTimeout(async () => {
+    try {
+      loadStatus.value = '同步野区实体'
+      await addRiftEntities(loader, root)
+      updateEntityResponsiveScale()
+      root.updateMatrixWorld(true)
+      groundEntitiesToTerrain(terrainMeshes, root)
+      updateLayerVisibility()
+      areEntitiesLoaded.value = true
+      loadStatus.value = '实体资源已就绪'
+    } catch (error) {
+      console.warn('Rift entity hydrate failed', error)
+      areEntitiesLoaded.value = true
+      loadStatus.value = '部分实体加载失败'
+    }
+  }, 120)
+}
+
 function disposeSceneObject(object: THREE.Object3D) {
   object.traverse((item) => {
     if (item instanceof THREE.Mesh || item instanceof THREE.Line || item instanceof THREE.Points || item instanceof THREE.Sprite) {
@@ -838,6 +1021,80 @@ async function addRiftEntities(loader: GLTFLoader, root: THREE.Group) {
   })
 }
 
+function loadBaseAsset(loader: GLTFLoader, asset: { url: string; label: string }, attemptIndex: number) {
+  return new Promise<THREE.Group>((resolve, reject) => {
+    loader.load(
+      asset.url,
+      (gltf) => resolve(gltf.scene),
+      (event) => {
+        lastBaseProgressAt = performance.now()
+        const attemptBase = attemptIndex * 18
+
+        if (event.total > 0) {
+          const progress = clamp(attemptBase + (event.loaded / event.total) * 72, 4, 96)
+          loadStatus.value = progress >= 92 ? `解压${asset.label}` : `下载${asset.label}`
+          setLoadProgress(progress)
+          return
+        }
+
+        loadStatus.value = `下载${asset.label}`
+        setLoadProgress(Math.min(92, loadProgress.value + 1))
+      },
+      reject,
+    )
+  })
+}
+
+function mountLoadedRiftBase(root: THREE.Group, model: THREE.Group) {
+  const modelGroup = new THREE.Group()
+  model.position.set(-MAP_CENTER_X, 0, -MAP_CENTER_Z)
+  modelGroup.scale.set(RIFT_X_SIGN * MAP_UNIT_SCALE, MAP_UNIT_SCALE, MAP_UNIT_SCALE)
+  const terrainMeshes: THREE.Mesh[] = []
+  terrainPickMeshes.length = 0
+
+  model.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) {
+      return
+    }
+
+    const materials = Array.isArray(object.material) ? object.material : [object.material]
+    const searchableName = [object.name, ...materials.map((material) => material.name)].join(' ')
+    if (isUnsupportedMapEffect(searchableName)) {
+      object.visible = false
+      object.raycast = () => {}
+      return
+    }
+
+    materials.forEach(tuneModelMaterial)
+    object.frustumCulled = true
+    terrainMeshes.push(object)
+    terrainPickMeshes.push(object)
+  })
+
+  modelGroup.add(model)
+  root.add(modelGroup)
+  return terrainMeshes
+}
+
+async function loadRiftBaseWithFallback(loader: GLTFLoader, root: THREE.Group) {
+  for (let index = 0; index < RIFT_BASE_ASSETS.length; index += 1) {
+    const asset = RIFT_BASE_ASSETS[index]
+
+    try {
+      hasLoadError.value = false
+      loadStatus.value = `连接${asset.label}`
+      const model = await loadBaseAsset(loader, asset, index)
+      loadStatus.value = '解析峡谷地形'
+      return mountLoadedRiftBase(root, model)
+    } catch (error) {
+      console.warn(`Rift base load failed: ${asset.label}`, error)
+      loadStatus.value = index < RIFT_BASE_ASSETS.length - 1 ? '切换轻量峡谷地形' : '启用备用战术沙盘'
+    }
+  }
+
+  return createFallbackRiftMap(root)
+}
+
 function setupScene(canvas: HTMLCanvasElement) {
   const nextRenderer = new THREE.WebGLRenderer({
     canvas,
@@ -914,95 +1171,26 @@ function setupScene(canvas: HTMLCanvasElement) {
       }
 
       if (idleMs > 45000) {
-        hasLoadError.value = true
-        loadStatus.value = '公网模型下载超时，请刷新重试'
-        loadProgress.value = 0
+        loadStatus.value = '加载较慢，准备备用沙盘'
         window.clearInterval(baseLoadTimeout)
       }
     }
   }, 3000)
-  gltfLoader.load(
-    RIFT_BASE_ASSET,
-    async (gltf) => {
+
+  void loadRiftBaseWithFallback(gltfLoader, root)
+    .then((terrainMeshes) => {
       window.clearInterval(baseLoadTimeout)
       hasLoadError.value = false
-      loadStatus.value = '解析峡谷地形'
-      const model = gltf.scene
-
-      const modelGroup = new THREE.Group()
-      model.position.set(-MAP_CENTER_X, 0, -MAP_CENTER_Z)
-      modelGroup.scale.set(RIFT_X_SIGN * MAP_UNIT_SCALE, MAP_UNIT_SCALE, MAP_UNIT_SCALE)
-      const terrainMeshes: THREE.Mesh[] = []
-      terrainPickMeshes.length = 0
-
-      model.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) {
-          return
-        }
-
-        const materials = Array.isArray(object.material) ? object.material : [object.material]
-        const searchableName = [object.name, ...materials.map((material) => material.name)].join(' ')
-        if (isUnsupportedMapEffect(searchableName)) {
-          object.visible = false
-          object.raycast = () => {}
-          return
-        }
-
-        materials.forEach(tuneModelMaterial)
-        object.frustumCulled = true
-        terrainMeshes.push(object)
-        terrainPickMeshes.push(object)
-      })
-
-      modelGroup.add(model)
-      root.add(modelGroup)
-      root.updateMatrixWorld(true)
-      addTacticalOverlay(root)
-      scanField = createScanField()
-      root.add(scanField)
-      focusRipple = addFocusRipple(root)
-      markers.forEach((marker) => root.add(createMarker(marker)))
-      updateLayerVisibility()
-
-      enterRiftStage(100)
-      loadStatus.value = '峡谷沙盘已就绪'
-
-      entityHydrateTimer = window.setTimeout(async () => {
-        try {
-          loadStatus.value = '同步野区实体'
-          await addRiftEntities(gltfLoader, root)
-          updateEntityResponsiveScale()
-          root.updateMatrixWorld(true)
-          groundEntitiesToTerrain(terrainMeshes, root)
-          updateLayerVisibility()
-          areEntitiesLoaded.value = true
-          loadStatus.value = '实体资源已就绪'
-        } catch (error) {
-          console.warn('Rift entity hydrate failed', error)
-          areEntitiesLoaded.value = true
-          loadStatus.value = '部分实体加载失败'
-        }
-      }, 120)
-    },
-    (event) => {
-      lastBaseProgressAt = performance.now()
-      if (event.total > 0) {
-        const progress = clamp((event.loaded / event.total) * 96, 4, 96)
-        loadStatus.value = progress >= 96 ? '解压峡谷地形' : '下载峡谷地形'
-        setLoadProgress(progress)
-      } else {
-        loadStatus.value = '下载峡谷地形'
-        setLoadProgress(Math.min(96, loadProgress.value + 1))
-      }
-    },
-    (error) => {
+      loadStatus.value = terrainMeshes.length > 1 ? '峡谷沙盘已就绪' : '备用战术沙盘已就绪'
+      attachRiftStage(root, terrainMeshes, gltfLoader)
+    })
+    .catch((error) => {
       window.clearInterval(baseLoadTimeout)
-      console.warn('Rift base load failed', error)
+      console.warn('Rift fallback stage failed', error)
       hasLoadError.value = true
       loadProgress.value = 0
-      loadStatus.value = '峡谷模型下载中断，请刷新重试'
-    },
-  )
+      loadStatus.value = '峡谷沙盘初始化失败'
+    })
 
   renderer = nextRenderer
   scene = nextScene

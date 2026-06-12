@@ -25,7 +25,7 @@ export function initAuthModels(sequelize) {
         field: 'password_hash'
       },
       role: {
-        type: DataTypes.ENUM('super_admin', 'admin'),
+        type: DataTypes.STRING(64),
         allowNull: false,
         defaultValue: 'admin'
       },

@@ -5,9 +5,56 @@ import { config } from '../../config/index.js';
 import { getModels } from '../../models/index.js';
 
 const sessionTokenBytes = 32;
+const sessionCacheTtlMs = 30 * 1000;
+const lastSeenWriteIntervalMs = 60 * 1000;
+const sessionCache = new Map();
+const lastSeenWriteAtByTokenHash = new Map();
 
 function hashToken(token) {
   return createHash('sha256').update(token).digest('hex');
+}
+
+function cloneAdminSession(admin) {
+  return admin ? { ...admin } : null;
+}
+
+function readCachedSession(tokenHash) {
+  const cached = sessionCache.get(tokenHash);
+
+  if (!cached || cached.cacheExpiresAt <= Date.now()) {
+    sessionCache.delete(tokenHash);
+    return null;
+  }
+
+  return cloneAdminSession(cached.admin);
+}
+
+function writeCachedSession(tokenHash, admin, sessionExpiresAt) {
+  sessionCache.set(tokenHash, {
+    admin: cloneAdminSession(admin),
+    cacheExpiresAt: Math.min(Date.now() + sessionCacheTtlMs, sessionExpiresAt.getTime())
+  });
+}
+
+function shouldWriteLastSeen(tokenHash) {
+  const now = Date.now();
+  const lastWriteAt = lastSeenWriteAtByTokenHash.get(tokenHash) ?? 0;
+
+  if (now - lastWriteAt < lastSeenWriteIntervalMs) {
+    return false;
+  }
+
+  lastSeenWriteAtByTokenHash.set(tokenHash, now);
+  return true;
+}
+
+export function clearAdminSessionCacheByAdminId(adminUserId) {
+  for (const [tokenHash, cached] of sessionCache.entries()) {
+    if (Number(cached.admin?.id) === Number(adminUserId)) {
+      sessionCache.delete(tokenHash);
+      lastSeenWriteAtByTokenHash.delete(tokenHash);
+    }
+  }
 }
 
 function toLegacyAdmin(admin) {
@@ -40,6 +87,15 @@ export async function findAdminByEmail(email) {
   return toLegacyAdmin(admin);
 }
 
+export async function findAdminById(id) {
+  const { AdminUser } = getModels();
+  const admin = await AdminUser.findByPk(id, {
+    attributes: ['id', 'email', 'name', 'passwordHash', 'role', 'isActive']
+  });
+
+  return toLegacyAdmin(admin);
+}
+
 export async function createAdminSession({ adminUserId, ipAddress, userAgent }) {
   const { AdminSession } = getModels();
   const token = randomBytes(sessionTokenBytes).toString('base64url');
@@ -62,10 +118,17 @@ export async function findAdminBySessionToken(token) {
     return null;
   }
 
+  const tokenHash = hashToken(token);
+  const cachedAdmin = readCachedSession(tokenHash);
+
+  if (cachedAdmin) {
+    return cachedAdmin;
+  }
+
   const { AdminSession, AdminUser } = getModels();
   const session = await AdminSession.findOne({
     where: {
-      tokenHash: hashToken(token),
+      tokenHash,
       revokedAt: null,
       expiresAt: {
         [Op.gt]: new Date()
@@ -88,19 +151,25 @@ export async function findAdminBySessionToken(token) {
     return null;
   }
 
-  await session.update({
-    lastSeenAt: new Date()
-  });
+  if (shouldWriteLastSeen(tokenHash)) {
+    await session.update({
+      lastSeenAt: new Date()
+    });
+  }
 
   const admin = session.adminUser.get({ plain: true });
 
-  return {
+  const adminSession = {
     session_id: session.id,
     id: admin.id,
     email: admin.email,
     name: admin.name,
     role: admin.role
   };
+
+  writeCachedSession(tokenHash, adminSession, session.expiresAt);
+
+  return cloneAdminSession(adminSession);
 }
 
 export async function revokeAdminSession(token) {
@@ -109,6 +178,7 @@ export async function revokeAdminSession(token) {
   }
 
   const { AdminSession } = getModels();
+  const tokenHash = hashToken(token);
 
   await AdminSession.update(
     {
@@ -116,11 +186,14 @@ export async function revokeAdminSession(token) {
     },
     {
       where: {
-        tokenHash: hashToken(token),
+        tokenHash,
         revokedAt: null
       }
     }
   );
+
+  sessionCache.delete(tokenHash);
+  lastSeenWriteAtByTokenHash.delete(tokenHash);
 }
 
 export async function markAdminLogin(adminUserId) {
@@ -136,6 +209,44 @@ export async function markAdminLogin(adminUserId) {
       }
     }
   );
+}
+
+export async function updateAdminProfile(adminUserId, { name }) {
+  const { AdminUser } = getModels();
+
+  await AdminUser.update(
+    {
+      name
+    },
+    {
+      where: {
+        id: adminUserId
+      }
+    }
+  );
+
+  clearAdminSessionCacheByAdminId(adminUserId);
+
+  return findAdminById(adminUserId);
+}
+
+export async function updateAdminPassword(adminUserId, passwordHash) {
+  const { AdminUser } = getModels();
+
+  await AdminUser.update(
+    {
+      passwordHash
+    },
+    {
+      where: {
+        id: adminUserId
+      }
+    }
+  );
+
+  clearAdminSessionCacheByAdminId(adminUserId);
+
+  return findAdminById(adminUserId);
 }
 
 export async function upsertAdminUser({ email, name, passwordHash, role = 'super_admin' }) {

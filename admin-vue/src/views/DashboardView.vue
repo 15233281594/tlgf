@@ -1,144 +1,256 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { builderBlocks, dashboardTabs, metrics, permissionRows } from '../data/admin'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { Activity, ArrowRight, FileText, KeyRound, MenuSquare, RefreshCw, ScrollText, UsersRound } from '@lucide/vue'
+import { getAdminDashboard } from '../api/dashboard'
+import type { AdminOrder, PaymentStatus } from '../types/order'
+import type { DashboardResponse } from '../types/dashboard'
+import { hasPermission, permissionKeys } from '../utils/permissions'
+import { useAuth } from '../composables/useAuth'
 
-const activeTab = ref('permission-overview')
+const router = useRouter()
+const { user } = useAuth()
+const loading = ref(false)
+const errorMessage = ref('')
+const dashboard = ref<DashboardResponse | null>(null)
+
+const paymentStatusLabels: Record<PaymentStatus, string> = {
+  pending: '待支付',
+  reviewing: '待审核',
+  paid: '已支付',
+  rejected: '已驳回',
+  cancelled: '已取消'
+}
+
+const metrics = computed(() => {
+  const data = dashboard.value
+
+  return [
+    {
+      label: '订单总量',
+      value: data?.metrics.orders.total ?? 0,
+      desc: `待审核 ${data?.metrics.orders.reviewing ?? 0}，待支付 ${data?.metrics.orders.pending ?? 0}`,
+      icon: FileText
+    },
+    {
+      label: '确认金额',
+      value: formatMoney(data?.metrics.orders.totalAmountCents ?? 0),
+      desc: `已支付订单 ${data?.metrics.orders.paid ?? 0} 笔`,
+      icon: Activity
+    },
+    {
+      label: '后台成员',
+      value: data?.metrics.members.active ?? 0,
+      desc: `共 ${data?.metrics.members.total ?? 0} 人，停用 ${data?.metrics.members.inactive ?? 0} 人`,
+      icon: UsersRound
+    },
+    {
+      label: '权限体系',
+      value: data?.metrics.permissionCount ?? 0,
+      desc: `${data?.metrics.roles.active ?? 0} 个启用角色，${data?.metrics.menus.visible ?? 0} 个可见菜单`,
+      icon: KeyRound
+    }
+  ]
+})
+
+const visibleTodo = computed(() =>
+  (dashboard.value?.todo ?? []).filter((item) => hasPermission(user.value?.permissions, item.permission))
+)
+
+function formatMoney(cents: number) {
+  return new Intl.NumberFormat('zh-CN', {
+    style: 'currency',
+    currency: 'CNY'
+  }).format(cents / 100)
+}
+
+function formatDate(value: string | null) {
+  if (!value) {
+    return '-'
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(value))
+}
+
+function orderTitle(order: AdminOrder) {
+  return order.customerName || order.contactValue || order.orderNo
+}
+
+function openRoute(routeName: string) {
+  void router.push({ name: routeName })
+}
+
+async function loadDashboard() {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    dashboard.value = await getAdminDashboard()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '业务工作台加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadDashboard)
 </script>
 
 <template>
   <section class="page-title">
     <div>
-      <p>Permission Architecture</p>
-      <h1>权限中心先行</h1>
-      <span>后台的第一步是角色、菜单、按钮、数据范围和审计日志，后续客户端装修和订单支付都挂在这套权限下面。</span>
+      <p>Business Console</p>
+      <h1>业务工作台</h1>
+      <span>订单、支付、权限、成员和审计日志都会聚合在这里，先看待办，再进入对应模块处理。</span>
     </div>
-    <div class="title-actions">
-      <button class="secondary-button" type="button">查看规范</button>
-      <button class="primary-action" type="button">新建角色</button>
-    </div>
-  </section>
-
-  <section class="tabbar" aria-label="三级导航">
-    <button
-      v-for="tab in dashboardTabs"
-      :key="tab.id"
-      :class="{ active: activeTab === tab.id }"
-      type="button"
-      @click="activeTab = tab.id"
-    >
-      {{ tab.label }}
+    <button class="secondary-button" type="button" :disabled="loading" @click="loadDashboard">
+      <RefreshCw :size="16" />
+      刷新
     </button>
   </section>
 
+  <section v-if="errorMessage" class="notice error">{{ errorMessage }}</section>
+
   <section class="metrics-row">
     <article v-for="item in metrics" :key="item.label" class="metric-card">
-      <span>{{ item.label }}</span>
+      <div>
+        <span>{{ item.label }}</span>
+        <component :is="item.icon" :size="19" />
+      </div>
       <strong>{{ item.value }}</strong>
       <p>{{ item.desc }}</p>
     </article>
   </section>
 
   <section class="main-grid">
-    <section class="panel permissions-panel">
+    <section class="panel todo-panel">
       <header class="panel-head">
         <div>
-          <p>Role Matrix</p>
-          <h2>权限矩阵</h2>
+          <p>Todo Queue</p>
+          <h2>业务待办</h2>
         </div>
-        <button class="secondary-button" type="button">配置权限</button>
+        <Activity :size="21" />
       </header>
 
-      <table>
+      <div v-if="loading" class="empty-state">加载中...</div>
+      <div v-else-if="!visibleTodo.length" class="empty-state">暂无可处理待办</div>
+
+      <div v-else class="todo-list">
+        <button v-for="item in visibleTodo" :key="item.key" type="button" @click="openRoute(item.routeName)">
+          <span>
+            <strong>{{ item.title }}</strong>
+            <em>{{ item.count > 0 ? '需要关注' : '当前正常' }}</em>
+          </span>
+          <i>{{ item.count }}</i>
+          <ArrowRight :size="17" />
+        </button>
+      </div>
+    </section>
+
+    <section class="panel orders-panel">
+      <header class="panel-head">
+        <div>
+          <p>Recent Orders</p>
+          <h2>最近订单</h2>
+        </div>
+        <button v-permission="permissionKeys.orderRead" class="secondary-button" type="button" @click="openRoute('orders')">
+          查看订单
+        </button>
+      </header>
+
+      <div v-if="loading" class="empty-state">加载中...</div>
+      <div v-else-if="!dashboard?.recentOrders.length" class="empty-state">暂无订单</div>
+
+      <table v-else>
         <thead>
           <tr>
-            <th>模块</th>
-            <th>超级管理员</th>
-            <th>财务</th>
-            <th>客服</th>
+            <th>订单</th>
+            <th>客户</th>
+            <th>金额</th>
+            <th>支付</th>
+            <th>时间</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="row in permissionRows" :key="row.module">
-            <td>{{ row.module }}</td>
-            <td><span class="status-chip strong">{{ row.admin }}</span></td>
-            <td><span class="status-chip">{{ row.finance }}</span></td>
-            <td><span class="status-chip muted">{{ row.service }}</span></td>
+          <tr v-for="order in dashboard.recentOrders" :key="order.id">
+            <td>
+              <strong>{{ order.orderNo }}</strong>
+              <em>{{ order.serviceType }}</em>
+            </td>
+            <td>{{ orderTitle(order) }}</td>
+            <td>{{ formatMoney(order.amountCents) }}</td>
+            <td>
+              <span class="status-chip" :class="order.paymentStatus">{{ paymentStatusLabels[order.paymentStatus] }}</span>
+            </td>
+            <td>{{ formatDate(order.createdAt) }}</td>
           </tr>
         </tbody>
       </table>
     </section>
-
-    <aside class="panel publish-panel">
-      <header class="panel-head">
-        <div>
-          <p>Publish Flow</p>
-          <h2>后台发布链路</h2>
-        </div>
-      </header>
-
-      <ol class="timeline">
-        <li>
-          <span />
-          <div>
-            <strong>权限校验</strong>
-            <p>判断角色是否能编辑页面、价格和支付配置。</p>
-          </div>
-        </li>
-        <li>
-          <span />
-          <div>
-            <strong>保存草稿</strong>
-            <p>配置先进入草稿版本，不直接影响客户端。</p>
-          </div>
-        </li>
-        <li>
-          <span />
-          <div>
-            <strong>发布生效</strong>
-            <p>客户端读取最新发布版本，支持回滚。</p>
-          </div>
-        </li>
-      </ol>
-    </aside>
   </section>
 
-  <section class="builder-section panel">
-    <header class="panel-head">
-      <div>
-        <p>Client Builder</p>
-        <h2>客户端装修模块骨架</h2>
-      </div>
-      <button class="secondary-button" type="button">打开装修器</button>
-    </header>
-
-    <div class="builder-grid">
-      <article v-for="block in builderBlocks" :key="block.title" class="builder-card">
-        <strong>{{ block.title }}</strong>
-        <p>{{ block.desc }}</p>
-      </article>
-
-      <div class="client-preview">
-        <div class="preview-nav" />
-        <div class="preview-hero">
-          <span />
-          <strong />
+  <section class="secondary-grid">
+    <section class="panel roles-panel">
+      <header class="panel-head">
+        <div>
+          <p>Role Governance</p>
+          <h2>角色权限</h2>
         </div>
-        <div class="preview-cards">
-          <i />
-          <i />
-          <i />
-        </div>
+        <button v-permission="permissionKeys.permissionManage" class="secondary-button" type="button" @click="openRoute('roles')">
+          配置权限
+        </button>
+      </header>
+
+      <div class="role-grid">
+        <article v-for="role in dashboard?.roles ?? []" :key="role.key">
+          <strong>{{ role.name }}</strong>
+          <span>{{ role.permissionCount }} 个权限点</span>
+          <em>{{ role.isSystem ? '系统角色' : role.isActive ? '启用' : '停用' }}</em>
+        </article>
       </div>
-    </div>
+    </section>
+
+    <section class="panel system-panel">
+      <header class="panel-head">
+        <div>
+          <p>System Modules</p>
+          <h2>后台能力</h2>
+        </div>
+        <MenuSquare :size="21" />
+      </header>
+
+      <div class="module-grid">
+        <button v-permission="permissionKeys.memberManage" type="button" @click="openRoute('members')">
+          <UsersRound :size="19" />
+          <span>成员账号</span>
+          <em>{{ dashboard?.metrics.members.total ?? 0 }} 人</em>
+        </button>
+        <button v-permission="permissionKeys.menuManage" type="button" @click="openRoute('menu-management')">
+          <MenuSquare :size="19" />
+          <span>菜单管理</span>
+          <em>{{ dashboard?.metrics.menus.visible ?? 0 }} 个可见</em>
+        </button>
+        <button v-permission="permissionKeys.auditRead" type="button" @click="openRoute('audit-logs')">
+          <ScrollText :size="19" />
+          <span>审计日志</span>
+          <em>最近 {{ dashboard?.auditLogs.length ?? 0 }} 条</em>
+        </button>
+      </div>
+    </section>
   </section>
 </template>
 
 <style scoped>
 .page-title,
-.tabbar,
 .metrics-row,
 .main-grid,
-.builder-section {
+.secondary-grid,
+.notice {
   margin: 20px 28px 0;
 }
 
@@ -151,8 +263,8 @@ const activeTab = ref('permission-overview')
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background:
-    linear-gradient(135deg, rgba(255, 215, 122, 0.12), transparent 32%),
-    linear-gradient(90deg, #ffffff, #f8fbff);
+    linear-gradient(135deg, rgba(49, 212, 232, 0.1), transparent 34%),
+    #fff;
 }
 
 .page-title p,
@@ -172,67 +284,10 @@ const activeTab = ref('permission-overview')
 
 .page-title span {
   display: block;
-  max-width: 780px;
+  max-width: 760px;
   margin-top: 10px;
   color: var(--muted);
   line-height: 1.7;
-}
-
-.title-actions,
-.panel-head {
-  display: flex;
-  align-items: center;
-}
-
-.title-actions {
-  gap: 10px;
-}
-
-.primary-action,
-.secondary-button {
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 6px;
-  font-weight: 700;
-}
-
-.primary-action {
-  border: 1px solid rgba(255, 215, 122, 0.42);
-  color: #08101c;
-  background: linear-gradient(135deg, #ffd77a, #c89236);
-  font-weight: 800;
-}
-
-.secondary-button {
-  border: 1px solid var(--line);
-  color: #344054;
-  background: #fff;
-}
-
-.tabbar {
-  display: flex;
-  gap: 4px;
-  min-height: 44px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: #fff;
-}
-
-.tabbar button {
-  min-width: 108px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 6px;
-  color: #475467;
-  background: transparent;
-  font-weight: 700;
-}
-
-.tabbar button.active,
-.tabbar button:hover {
-  color: #06101b;
-  background: rgba(216, 168, 77, 0.16);
 }
 
 .metrics-row {
@@ -242,7 +297,8 @@ const activeTab = ref('permission-overview')
 }
 
 .metric-card,
-.panel {
+.panel,
+.notice {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
@@ -253,7 +309,26 @@ const activeTab = ref('permission-overview')
   padding: 18px;
 }
 
-.metric-card span {
+.metric-card div,
+.panel-head,
+.todo-list button,
+.module-grid button,
+.secondary-button {
+  display: flex;
+  align-items: center;
+}
+
+.metric-card div,
+.panel-head {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.metric-card span,
+.todo-list em,
+.role-grid span,
+.role-grid em,
+.module-grid em {
   color: var(--muted);
   font-size: 13px;
 }
@@ -274,17 +349,22 @@ const activeTab = ref('permission-overview')
 
 .main-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.secondary-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 420px;
   gap: 14px;
 }
 
 .panel {
+  min-width: 0;
   padding: 20px;
 }
 
 .panel-head {
-  justify-content: space-between;
-  gap: 14px;
   margin-bottom: 18px;
 }
 
@@ -293,17 +373,79 @@ const activeTab = ref('permission-overview')
   font-size: 20px;
 }
 
+.secondary-button {
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #344054;
+  background: #fff;
+  font-weight: 800;
+}
+
+.todo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.todo-list button {
+  width: 100%;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e4ebf4;
+  border-radius: 8px;
+  color: var(--text);
+  background: #f8fbff;
+  text-align: left;
+}
+
+.todo-list button:hover {
+  border-color: rgba(216, 168, 77, 0.46);
+  background: #fff8e8;
+}
+
+.todo-list strong,
+.todo-list em {
+  display: block;
+}
+
+.todo-list em {
+  margin-top: 5px;
+}
+
+.todo-list i {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 6px;
+  color: #7a5616;
+  background: rgba(216, 168, 77, 0.14);
+  font-style: normal;
+  font-weight: 900;
+}
+
+.orders-panel {
+  overflow-x: auto;
+}
+
 table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
 }
 
 th,
 td {
-  height: 50px;
-  padding: 0 12px;
+  min-height: 54px;
+  padding: 13px 12px;
   border-bottom: 1px solid #edf1f6;
   text-align: left;
+  vertical-align: middle;
   font-size: 14px;
 }
 
@@ -313,144 +455,108 @@ th {
   font-weight: 900;
 }
 
+td strong,
+td em {
+  display: block;
+}
+
+td em {
+  margin-top: 5px;
+  color: #7e8ea3;
+  font-size: 12px;
+  font-style: normal;
+}
+
 .status-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 9px;
   border-radius: 999px;
-  color: #16665a;
-  background: #e8f7f2;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
-.status-chip.strong {
+.status-chip.pending {
   color: #7a5616;
   background: #fff4d7;
 }
 
-.status-chip.muted {
-  color: #667085;
-  background: #f1f4f8;
+.status-chip.reviewing {
+  color: #175cd3;
+  background: #eaf1ff;
 }
 
-.timeline {
+.status-chip.paid {
+  color: #16665a;
+  background: #e8f7f2;
+}
+
+.status-chip.rejected,
+.status-chip.cancelled {
+  color: var(--danger);
+  background: #fff5f5;
+}
+
+.role-grid,
+.module-grid {
   display: grid;
-  gap: 16px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.timeline li {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 12px;
-}
-
-.timeline li > span {
-  width: 12px;
-  height: 12px;
-  margin-top: 5px;
-  border: 2px solid var(--gold);
-  border-radius: 999px;
-}
-
-.timeline strong {
-  display: block;
-  font-size: 14px;
-}
-
-.timeline p {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.builder-section {
-  margin-bottom: 0;
-}
-
-.builder-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) 360px;
-  gap: 12px;
-}
-
-.builder-card {
-  min-height: 118px;
+.role-grid article,
+.module-grid button {
+  min-width: 0;
   padding: 14px;
-  border: 1px solid #e3e9f2;
-  border-radius: var(--radius);
+  border: 1px solid #e4ebf4;
+  border-radius: 8px;
   background: #f8fbff;
 }
 
-.builder-card strong {
+.role-grid strong,
+.role-grid span,
+.role-grid em,
+.module-grid span,
+.module-grid em {
   display: block;
 }
 
-.builder-card p {
-  margin: 8px 0 0;
+.role-grid span,
+.role-grid em,
+.module-grid em {
+  margin-top: 6px;
+}
+
+.module-grid button {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text);
+  text-align: left;
+}
+
+.module-grid button:hover {
+  border-color: rgba(216, 168, 77, 0.46);
+  background: #fff8e8;
+}
+
+.notice {
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.notice.error {
+  color: var(--danger);
+  background: #fff5f5;
+}
+
+.empty-state {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.client-preview {
-  grid-row: span 2;
-  min-height: 250px;
-  padding: 14px;
-  border-radius: var(--radius);
-  background:
-    radial-gradient(circle at 20% 0, rgba(49, 212, 232, 0.18), transparent 12rem),
-    #050810;
-}
-
-.preview-nav,
-.preview-hero,
-.preview-cards i {
-  border-radius: 6px;
-}
-
-.preview-nav {
-  height: 28px;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.preview-hero {
-  display: grid;
-  gap: 10px;
-  align-content: end;
-  height: 116px;
-  margin-top: 12px;
-  padding: 14px;
-  background: linear-gradient(135deg, rgba(255, 215, 122, 0.22), rgba(49, 212, 232, 0.1));
-}
-
-.preview-hero span,
-.preview-hero strong {
-  display: block;
-  height: 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.38);
-}
-
-.preview-hero strong {
-  width: 64%;
-}
-
-.preview-cards {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.preview-cards i {
-  height: 58px;
-  background: rgba(255, 255, 255, 0.08);
 }
 
 @media (max-width: 1280px) {
@@ -459,44 +565,38 @@ th {
   }
 
   .main-grid,
-  .builder-grid {
+  .secondary-grid {
     grid-template-columns: 1fr;
   }
 }
 
-@media (max-width: 980px) {
-  .page-title {
+@media (max-width: 840px) {
+  .page-title,
+  .panel-head {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .title-actions {
-    justify-content: flex-start;
-    flex-wrap: wrap;
   }
 }
 
 @media (max-width: 640px) {
   .page-title,
-  .panel {
-    padding: 20px;
-  }
-
-  .metrics-row {
-    grid-template-columns: 1fr;
-  }
-
-  .page-title,
-  .tabbar,
   .metrics-row,
   .main-grid,
-  .builder-section {
+  .secondary-grid,
+  .notice {
     margin-right: 14px;
     margin-left: 14px;
   }
 
-  .tabbar {
-    overflow-x: auto;
+  .page-title,
+  .panel {
+    padding: 20px;
+  }
+
+  .metrics-row,
+  .role-grid,
+  .module-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
